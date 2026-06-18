@@ -14,3 +14,4 @@ target/
 
 # RustRover
 /.idea
+Cargo.build-spec.json
