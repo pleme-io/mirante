@@ -1,0 +1,28 @@
+[package]
+name = "mirante-tasks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "./lib.rs"
+
+[dependencies]
+mirante-common = { workspace = true }
+mirante-config = { workspace = true }
+mirante-kube = { workspace = true }
+http = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+ratatui-core = { workspace = true }
+serde_yaml = { workspace = true }
+syntect = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = {workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

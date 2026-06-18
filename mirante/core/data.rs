@@ -1,0 +1,274 @@
+use arboard::Clipboard;
+use mirante_common::NotificationSink;
+use mirante_config::keys::{KeyBindings, KeyCombination, KeyCommand};
+use mirante_config::{Config, History, themes::Theme};
+use mirante_kube::{CONTAINERS, InitData, Kind, Namespace, ResourceRef};
+use mirante_tui::{ToSelectData, TuiEvent};
+use kube::discovery::Scope;
+use std::borrow::Cow;
+use std::{cell::RefCell, collections::HashSet, rc::Rc};
+
+use crate::kube::kinds::KindItem;
+
+pub type SharedAppData = Rc<RefCell<AppData>>;
+
+/// Kubernetes resources data.
+pub struct ResourcesInfo {
+    pub context: String,
+    pub version: String,
+    pub scope: Scope,
+    pub resource: ResourceRef,
+    pub namespace: Namespace,
+    selected_namespace: Namespace,
+}
+
+impl Default for ResourcesInfo {
+    fn default() -> Self {
+        Self {
+            context: String::default(),
+            version: String::default(),
+            scope: Scope::Cluster,
+            resource: ResourceRef::default(),
+            namespace: Namespace::default(),
+            selected_namespace: Namespace::default(),
+        }
+    }
+}
+
+impl ResourcesInfo {
+    /// Creates new [`ResourcesInfo`] instance from provided values.
+    pub fn from(context: String, namespace: Namespace, version: String, scope: Scope) -> Self {
+        Self {
+            context,
+            selected_namespace: namespace.clone(),
+            namespace,
+            version,
+            scope,
+            ..Default::default()
+        }
+    }
+
+    /// Updates [`ResourcesInfo`] with data from the [`InitData`].\
+    /// **Note** that this update do not change the flag `is_all_namespace`.
+    /// This results in remembering if the `all` namespace was set by user or by [`InitData`].
+    pub fn update_from(&mut self, data: &InitData) {
+        self.resource = data.resource.clone();
+        self.scope = data.scope.clone();
+
+        // change the namespace only if resource is namespaced
+        if self.scope == Scope::Namespaced {
+            self.namespace = data.resource.namespace.clone();
+        }
+    }
+
+    /// Returns `true` if specified `namespace` is equal to the currently held by [`ResourcesInfo`].\
+    /// **Note** that it takes into account the flag for `all` namespace.
+    pub fn is_all_namespace(&self) -> bool {
+        self.selected_namespace.is_all() || self.namespace.is_all()
+    }
+
+    /// Returns `true` if specified `namespace` is equal to the currently held by [`ResourcesInfo`].\
+    /// **Note** that it takes into account the flag for `all` namespace.
+    pub fn is_namespace_equal(&self, namespace: &Namespace) -> bool {
+        self.selected_namespace == *namespace
+    }
+
+    /// Returns `true` if specified `kind` is equal to the currently held by [`ResourcesInfo`].
+    pub fn is_kind_equal(&self, kind: &Kind) -> bool {
+        (self.resource.is_container() && kind.as_str() == CONTAINERS)
+            || (!self.resource.is_container() && &self.resource.kind == kind)
+    }
+
+    /// Sets new namespace.\
+    /// **Note** that it takes into account the flag for `all` namespace.
+    pub fn set_namespace(&mut self, namespace: Namespace) {
+        self.selected_namespace = namespace;
+    }
+
+    /// Gets namespace respecting the flag if it is an `all` namespace.
+    pub fn get_namespace(&self) -> Namespace {
+        self.selected_namespace.clone()
+    }
+}
+
+/// Keeps data needed to navigate to the previous resource.
+pub struct PreviousData {
+    pub list: Scope,
+    pub header: Scope,
+    pub namespace: Namespace,
+    pub resource: ResourceRef,
+    pub highlighted: ToSelectData,
+    pub filter: Option<String>,
+    pub sort_info: (usize, bool),
+    pub offset: usize,
+}
+
+impl PreviousData {
+    /// Returns `kind` name for this previous data.
+    pub fn get_kind_name(&self) -> String {
+        self.resource.kind.name().to_owned()
+    }
+}
+
+/// App connection state.
+#[derive(Default, Clone, Copy, PartialEq)]
+pub enum ConnectionState {
+    #[default]
+    Connecting,
+    Initializing,
+    Ready,
+}
+
+/// Contains all data that can be shared in the application.
+#[derive(Default)]
+pub struct AppData {
+    /// Application configuration.
+    pub config: Config,
+
+    /// UI key bindings.
+    pub key_bindings: KeyBindings,
+    disabled_commands: HashSet<KeyCommand>,
+    disabled_keys: HashSet<KeyCombination>,
+
+    /// Application history data.
+    pub history: History,
+
+    /// Current application theme.
+    pub theme: Theme,
+
+    /// Information about currently selected Kubernetes resource.
+    pub current: ResourcesInfo,
+    pub previous: Vec<PreviousData>,
+
+    /// Filter that should be applied to all resources.
+    pub pinned_filter: Option<String>,
+    pub is_pinned: bool,
+
+    pub is_mouse_enabled: bool,
+
+    /// Holds all discovered kinds.
+    pub kinds: Option<Vec<KindItem>>,
+
+    /// Holds clipboard object.
+    pub clipboard: Option<Clipboard>,
+
+    /// Indicates if application is connected to the Kubernetes API.
+    pub state: ConnectionState,
+}
+
+impl AppData {
+    /// Creates new [`AppData`] instance.
+    pub fn new(config: Config, history: History, theme: Theme) -> Self {
+        let key_bindings = KeyBindings::default_with(config.key_bindings.clone());
+        Self {
+            config,
+            key_bindings,
+            history,
+            theme,
+            clipboard: Clipboard::new().ok(),
+            state: ConnectionState::Connecting,
+            ..Default::default()
+        }
+    }
+
+    /// Returns resource's `kind` and `namespace` from the history data.\
+    /// **Note** that if provided `context` is not found in the history file, current context resource is used.
+    pub fn get_namespaced_resource_from_config(&self, context: &str, namespace: Option<&str>) -> (Kind, Namespace) {
+        if let Some(kind) = self.history.get_kind(context) {
+            let namespace = self.history.get_namespace(context).or(namespace).unwrap_or_default();
+            (kind.into(), namespace.into())
+        } else {
+            let namespace = namespace.unwrap_or(self.current.namespace.as_str());
+            (self.current.resource.kind.clone(), namespace.into())
+        }
+    }
+
+    /// Returns `true` if the current resource is somehow constrained to a subset.\
+    /// **Note** that this means it should be reset if we are e.g. changing the namespace.
+    pub fn is_constrained(&self) -> bool {
+        !self.previous.is_empty() && (self.current.resource.is_container() || self.current.resource.is_filtered())
+    }
+
+    /// Returns `true` if state indicates that app is connected.
+    pub fn is_connected(&self) -> bool {
+        self.state != ConnectionState::Connecting
+    }
+}
+
+/// Extension methods for the [`SharedAppData`] type.
+pub trait SharedAppDataExt {
+    /// Returns `true` if the given [`TuiEvent`] is a key event and is bound to the specified [`KeyCommand`] within
+    /// the [`KeyBindings`] stored in [`SharedAppData`].
+    fn has_binding(&self, event: &TuiEvent, command: KeyCommand) -> bool;
+
+    /// Temporarily disables or enables the given [`KeyCommand`] from being matched by `has_binding`.
+    fn disable_command(&self, command: KeyCommand, disable: bool);
+
+    /// Temporarily disables or enables the given [`KeyCombination`] from being matched by `has_binding`.
+    fn disable_key(&self, key: KeyCombination, hide: bool);
+
+    /// Returns the first [`KeyCombination`] name associated with the specified [`KeyCommand`] from the [`KeyBindings`].
+    fn get_key_name(&self, command: KeyCommand) -> String;
+
+    /// Copies provided text to clipboard and executes `on_success_message` function.\
+    /// `on_success_message` should return text that will be shown in the footer on success.
+    fn copy_to_clipboard<'a>(
+        &mut self,
+        text: impl Into<Cow<'a, str>>,
+        sink: &NotificationSink,
+        on_success_message: impl FnOnce() -> &'static str,
+    );
+}
+
+impl SharedAppDataExt for SharedAppData {
+    fn has_binding(&self, event: &TuiEvent, command: KeyCommand) -> bool {
+        match event {
+            TuiEvent::Key(key) => {
+                let data = self.borrow();
+                !data.disabled_keys.contains(key)
+                    && !data.disabled_commands.contains(&command)
+                    && data.key_bindings.has_binding(key, command)
+            },
+            TuiEvent::Command(cmd) => command == *cmd,
+            TuiEvent::Mouse(_) => false,
+        }
+    }
+
+    fn disable_command(&self, command: KeyCommand, hide: bool) {
+        if hide {
+            self.borrow_mut().disabled_commands.insert(command);
+        } else {
+            self.borrow_mut().disabled_commands.remove(&command);
+        }
+    }
+
+    fn disable_key(&self, key: KeyCombination, hide: bool) {
+        if hide {
+            self.borrow_mut().disabled_keys.insert(key);
+        } else {
+            self.borrow_mut().disabled_keys.remove(&key);
+        }
+    }
+
+    fn get_key_name(&self, command: KeyCommand) -> String {
+        self.borrow().key_bindings.get_key_name(command).unwrap_or_default()
+    }
+
+    fn copy_to_clipboard<'a>(
+        &mut self,
+        text: impl Into<Cow<'a, str>>,
+        sink: &NotificationSink,
+        on_success_message: impl FnOnce() -> &'static str,
+    ) {
+        let text = text.into();
+        if !text.is_empty() {
+            if let Some(clipboard) = &mut self.borrow_mut().clipboard
+                && clipboard.set_text(text).is_ok()
+            {
+                sink.show_info(on_success_message(), 3_000);
+            } else {
+                sink.show_error("Unable to access clipboard functionality", 5_000);
+            }
+        }
+    }
+}

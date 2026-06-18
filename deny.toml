@@ -1,0 +1,46 @@
+# cargo-deny — license + advisory gate for mirante.
+# Run: cargo deny check licenses   (wired into CI so any future copyleft
+# introduction blocks the auto-release before it reaches crates.io).
+#
+# mirante is MIT (fork of fioletoven/b4n, also MIT). The full transitive
+# graph audited 2026-06-17 = 383 crates, 0 strong-copyleft. The only crate
+# carrying a copyleft token is r-efi (MIT OR Apache-2.0 OR LGPL-2.1-or-later),
+# a UEFI-only getrandom backend never compiled for our targets; cargo-deny
+# satisfies its OR-expression via MIT below, so no exception is required.
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive allowlist (covers the audited transitive set, incl. the
+# uncommon-but-permissive WTFPL/BSL-1.0/CC0-1.0 surfaced by the audit).
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "Unlicense",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "BSL-1.0",
+  "WTFPL",
+  "CC0-1.0",
+  "MPL-2.0",
+]
+# Strong copyleft is denied implicitly (anything not in `allow`). GPL/AGPL/
+# SSPL/CDDL/EUPL/OSL/EPL therefore fail the gate by construction.
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"

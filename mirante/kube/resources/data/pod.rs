@@ -1,0 +1,215 @@
+use mirante_kube::ResourceTag;
+use mirante_kube::stats::{CpuMetrics, MemoryMetrics, Statistics};
+use mirante_list::Item;
+use mirante_tui::table::{Column, Header, NAMESPACE};
+use k8s_openapi::jiff::Timestamp;
+use k8s_openapi::serde_json::Value;
+use kube::api::DynamicObject;
+use std::rc::Rc;
+
+use crate::kube::resources::{ResourceData, ResourceFilterContext, ResourceItem};
+use crate::ui::widgets::table::Cell;
+
+pub const PF_COLUMN_NO: usize = 2;
+const COLUMNS_NO_WITH_STATS: usize = 8;
+
+/// Returns [`ResourceData`] for the `pod` kubernetes resource.
+pub fn data(object: &DynamicObject, statistics: &Statistics) -> ResourceData {
+    let status = &object.data["status"];
+    let spec = &object.data["spec"];
+    let ready = status["containerStatuses"].as_array().map(|c| get_ready(c));
+    let phase = status["phase"].as_str();
+    let waiting = status["containerStatuses"]
+        .as_array()
+        .and_then(|c| get_first_waiting_reason(c));
+    let restarts = status["containerStatuses"].as_array().map(|c| get_restarts(c));
+    let node = spec["nodeName"].as_str();
+    let is_completed = if let Some(ph) = &phase { *ph == "Succeeded" } else { false };
+    let is_terminating = object.metadata.deletion_timestamp.is_some();
+
+    let (ready_str, is_ready) = if let Some(ready) = ready {
+        (Some(ready.0), ready.1)
+    } else {
+        (None, false)
+    };
+
+    let mut values = vec![
+        Cell::integer(restarts, 5),
+        ready_str.into(),
+        "".into(),
+        if is_terminating {
+            "Terminating".into()
+        } else if waiting.is_some() {
+            waiting.into()
+        } else {
+            phase.into()
+        },
+    ];
+
+    if statistics.has_metrics {
+        if let Some(node_name) = node
+            && let Some(pod_name) = object.metadata.name.as_deref()
+            && let Some(pod_namespace) = object.metadata.namespace.as_deref()
+            && let Some(stats) = statistics.pod(node_name, pod_name, pod_namespace)
+        {
+            values.push(stats.metrics.map(|m| m.cpu).into());
+            values.push(stats.metrics.map(|m| m.memory).into());
+        } else {
+            values.push(None::<CpuMetrics>.into());
+            values.push(None::<MemoryMetrics>.into());
+        }
+    }
+
+    values.push(status["podIP"].as_str().into());
+    values.push(node.into());
+
+    ResourceData {
+        extra_values: values.into_boxed_slice(),
+        is_completed,
+        is_ready: !is_terminating && is_ready,
+        is_terminating,
+        tags: get_container_tags(object),
+    }
+}
+
+/// Returns [`Header`] for the `pod` kubernetes resource.
+pub fn header(has_metrics: bool) -> Header {
+    let mut columns = vec![
+        Column::fixed("RESTARTS", 3, true),
+        Column::bound("READY", 3, 7, false),
+        Column::fixed("PF", 2, false), // this column position must match PF_COLUMN_NO
+        Column::bound("STATUS", 10, 20, false),
+    ];
+
+    let mut symbols = vec![' ', 'N', 'R', 'E', ' ', 'S'];
+
+    if has_metrics {
+        columns.push(Column::bound("CPU", 5, 15, true));
+        columns.push(Column::bound("MEM", 5, 15, true));
+        symbols.push('C');
+        symbols.push('M');
+    }
+
+    columns.push(Column::bound("IP", 11, 16, false));
+    columns.push(Column::bound("NODE", 12, 25, false));
+
+    symbols.push('I');
+    symbols.push('O');
+    symbols.push('A');
+
+    Header::from(
+        NAMESPACE,
+        Some(columns.into_boxed_slice()),
+        Rc::from(symbols.into_boxed_slice()),
+    )
+}
+
+/// Updates statistics for specified [`ResourceItem`] list mutable iterator.
+pub fn update_statistics<'a>(
+    items: impl Iterator<Item = &'a mut Item<ResourceItem, ResourceFilterContext>>,
+    statistics: &Statistics,
+) {
+    if !statistics.has_metrics {
+        return;
+    }
+
+    for item in items {
+        if let Some(data) = &mut item.data.data
+            && data.extra_values.len() == COLUMNS_NO_WITH_STATS
+            && let Some(node_name) = data.extra_values[7].raw_text()
+            && let Some(pod_namespace) = item.data.namespace.as_deref()
+            && let Some(stats) = statistics.pod(node_name, &item.data.name, pod_namespace)
+        {
+            data.extra_values[4] = stats.metrics.map(|m| m.cpu).into();
+            data.extra_values[5] = stats.metrics.map(|m| m.memory).into();
+        }
+    }
+}
+
+/// Returns `true` if this pod has only one container.\
+/// **Note** that init containers are not counted.
+pub fn has_single_container(data: Option<&ResourceData>) -> bool {
+    data.is_some_and(|d| {
+        d.tags
+            .iter()
+            .filter(|t| matches!(t, ResourceTag::Container(_, false, _)))
+            .count()
+            == 1
+    })
+}
+
+/// Returns single container name if pod has only one container.\
+/// **Note** that init containers are not counted.
+pub fn get_single_container(data: Option<&ResourceData>) -> Option<&str> {
+    data.and_then(|d| {
+        let mut non_init = d.tags.iter().filter_map(|t| match t {
+            ResourceTag::Container(name, false, _) => Some(name.as_str()),
+            _ => None,
+        });
+
+        let name = non_init.next()?;
+        if non_init.next().is_none() { Some(name) } else { None }
+    })
+}
+
+fn get_restarts(containers: &[Value]) -> i64 {
+    containers
+        .iter()
+        .map(|c| c["restartCount"].as_i64().unwrap_or(0))
+        .sum::<i64>()
+}
+
+fn get_ready(containers: &[Value]) -> (String, bool) {
+    let ready = containers.iter().filter(|c| c["ready"].as_bool().unwrap_or_default()).count();
+
+    (format!("{}/{}", ready, containers.len()), ready == containers.len())
+}
+
+fn get_first_waiting_reason(containers: &[Value]) -> Option<String> {
+    for c in containers {
+        if let Some(reason) = c
+            .get("state")
+            .and_then(|s| s.get("waiting"))
+            .and_then(|w| w.get("reason"))
+            .and_then(|r| r.as_str())
+        {
+            return Some(reason.to_owned());
+        }
+    }
+
+    None
+}
+
+fn get_container_tags(object: &DynamicObject) -> Box<[ResourceTag]> {
+    let status = &object.data["status"];
+    let spec = &object.data["spec"];
+
+    if let Some(mut names) = get_container_tag(&spec["containers"], &status["containerStatuses"], false) {
+        if let Some(mut init) = get_container_tag(&spec["initContainers"], &status["initContainerStatuses"], true) {
+            names.append(&mut init);
+        }
+
+        names.into_boxed_slice()
+    } else {
+        Box::default()
+    }
+}
+
+fn get_container_tag(containers: &Value, statuses: &Value, init: bool) -> Option<Vec<ResourceTag>> {
+    containers.as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|i| i["name"].as_str())
+            .map(|name| {
+                let finished_at = get_finished_at(statuses, name);
+                ResourceTag::Container(name.to_owned(), init, finished_at)
+            })
+            .collect()
+    })
+}
+
+fn get_finished_at(statuses: &Value, name: &str) -> Option<Timestamp> {
+    let container_status = statuses.as_array()?.iter().find(|s| s["name"].as_str() == Some(name))?;
+    container_status["state"]["terminated"]["finishedAt"]
+        .as_str()
+        .and_then(|t| t.parse().ok())
+}

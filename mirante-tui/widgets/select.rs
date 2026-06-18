@@ -1,0 +1,353 @@
+use mirante_config::themes::SelectColors;
+use crossterm::event::{KeyCode, KeyModifiers};
+use delegate::delegate;
+use ratatui_core::layout::{Constraint, Direction, Layout, Position, Rect};
+use ratatui_core::terminal::Frame;
+use std::rc::Rc;
+
+use crate::MouseEventKind;
+use crate::widgets::{ErrorHighlightMode, Input, ListWidget};
+use crate::{ResponseEvent, Responsive, TuiEvent, table::Table};
+
+const MAX_ITEMS_ON_SCREEN: u16 = 25;
+
+/// Select widget for TUI.
+#[derive(Default)]
+pub struct Select<T: Table> {
+    pub items: T,
+    items_area: Rect,
+    area: Rect,
+    colors: SelectColors,
+    filter: Input,
+    filter_area: Rect,
+    filter_auto_hide: bool,
+    filter_disabled: bool,
+    highlight_exact: bool,
+    last_key_highlighted: bool,
+}
+
+impl<T: Table> Select<T> {
+    /// Creates new [`Select`] instance.
+    /// * `filter_auto_hide` - hides filter input when no filter is present.
+    /// * `filter_show_cursor` - indicates if filter input should show cursor.
+    pub fn new(list: T, colors: SelectColors, filter_auto_hide: bool, filter_show_cursor: bool) -> Self {
+        let filter = Input::new(colors.filter.input)
+            .with_cursor(
+                filter_show_cursor && colors.cursor.is_some(),
+                colors.cursor.unwrap_or_default(),
+            )
+            .with_error_colors(colors.filter.error);
+
+        Select {
+            items: list,
+            items_area: Rect::default(),
+            area: Rect::default(),
+            colors,
+            filter,
+            filter_area: Rect::default(),
+            filter_auto_hide,
+            filter_disabled: false,
+            highlight_exact: false,
+            last_key_highlighted: false,
+        }
+    }
+
+    /// Adds prompt to the [`Select`] instance.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.set_prompt(prompt);
+        self
+    }
+
+    /// Adds a set of characters that should be accented by the [`Select`] instance.
+    pub fn with_accent_characters(mut self, highlight: impl Into<String>) -> Self {
+        self.filter.set_accent_characters(Some(highlight.into()));
+        self
+    }
+
+    /// Sets flag indicating if items should be highlighted only on exact match.
+    pub fn with_highlight_exact(mut self, highlight_exact: bool) -> Self {
+        self.highlight_exact = highlight_exact;
+        self
+    }
+
+    /// Sets delimiter characters for filter prefix exclusion.
+    pub fn with_filter_delimiters(mut self, delimiters: Vec<char>) -> Self {
+        self.filter.set_value_delimiters(delimiters);
+        self
+    }
+
+    /// Adds accept button to the filter input.
+    pub fn with_accept_button(mut self, visible: bool) -> Self {
+        self.set_accept_button(visible);
+        self
+    }
+
+    /// Sets accept button in the filter input.
+    pub fn set_accept_button(&mut self, visible: bool) {
+        if visible {
+            self.filter.set_accept_button(Some(("", ResponseEvent::Accepted)));
+        } else {
+            self.filter.set_accept_button(None);
+        }
+    }
+
+    /// Sets flag indicating if filter is disabled for this [`Select`] instance.
+    pub fn disable_filter(&mut self, disabled: bool) {
+        self.filter_disabled = disabled;
+    }
+
+    /// Sets prompt for the filter input.
+    pub fn set_prompt(&mut self, prompt: impl Into<String>) {
+        self.filter
+            .set_prompt(Some((prompt, self.colors.filter.prompt.unwrap_or_default())));
+    }
+
+    /// Sets colors for the filter input and list lines.
+    pub fn set_colors(&mut self, colors: SelectColors) {
+        self.filter.set_colors(colors.filter.input);
+        self.filter.set_prompt_colors(colors.filter.prompt.unwrap_or_default());
+        self.filter.set_error_colors(colors.filter.error);
+        self.filter.set_cursor_colors(colors.cursor);
+        self.colors = colors;
+    }
+
+    /// Gets colors set for this [`Select`] instance.
+    pub fn colors(&self) -> &SelectColors {
+        &self.colors
+    }
+
+    /// Gets select's area.
+    pub fn area(&self) -> Rect {
+        self.area
+    }
+
+    /// Gets area for select's items.
+    pub fn items_area(&self) -> Rect {
+        self.items_area
+    }
+
+    /// Gets area for select's filter.
+    pub fn filter_area(&self) -> Rect {
+        self.filter_area
+    }
+
+    /// Returns height needed to display items on screen.\
+    /// **Note** that it counts filter line if needed.
+    pub fn get_screen_height(&self) -> u16 {
+        let items = if self.is_filter_visible() {
+            self.items.len() + 1
+        } else {
+            self.items.len()
+        };
+        u16::try_from(items).unwrap_or(MAX_ITEMS_ON_SCREEN).min(MAX_ITEMS_ON_SCREEN)
+    }
+
+    /// Return `true` if filter line is visible.
+    pub fn is_filter_visible(&self) -> bool {
+        !self.filter_disabled && !self.filter_auto_hide || self.items.filter().is_some()
+    }
+
+    delegate! {
+        to self.filter {
+            pub fn show_cursor(&mut self, show_cursor: bool);
+            pub fn set_error_mode(&mut self, mode: ErrorHighlightMode);
+            pub fn has_error(&self) -> bool;
+            pub fn set_error(&mut self, error_index: Option<usize>);
+            pub fn prompt(&self) -> Option<&str>;
+            pub fn value(&self) -> &str;
+            pub fn value_full(&self) -> &str;
+            pub fn value_prefix(&self) -> &str;
+        }
+    }
+
+    /// Adds error highlight mode to the filter input.
+    pub fn with_error_mode(mut self, mode: ErrorHighlightMode) -> Self {
+        self.filter.set_error_mode(mode);
+        self
+    }
+
+    /// Sets the filter value.
+    pub fn set_value(&mut self, value: impl Into<String>) {
+        self.filter.set_value(value);
+        self.update_items_filter();
+    }
+
+    /// Inserts specified value to the filter.
+    pub fn insert_value(&mut self, value: &str) {
+        self.filter.insert_value(value);
+        self.update_items_filter();
+    }
+
+    /// Returns `true` if last processed key event highlighted element on the list.
+    pub fn has_last_key_highlighted(&self) -> bool {
+        self.last_key_highlighted
+    }
+
+    /// Returns `true` if anything on the select list is highlighted.
+    pub fn is_anything_highlighted(&self) -> bool {
+        self.items.get_highlighted_item_name().is_some()
+    }
+
+    /// Gets highlighted element name.
+    pub fn get_highlighted_item_name(&self) -> Option<&str> {
+        self.items.get_highlighted_item_name()
+    }
+
+    /// Resets the filter.
+    pub fn reset(&mut self) {
+        self.filter.reset();
+        self.items.set_filter(None);
+    }
+
+    /// Highlights first item.
+    pub fn highlight_first(&mut self) {
+        self.items.set_filter(None);
+        self.items.highlight_first_item();
+    }
+
+    /// Highlights an item by name.
+    pub fn highlight(&mut self, name: &str) {
+        self.items.set_filter(None);
+        self.items.highlight_item_by_name(name);
+    }
+
+    /// Highlights an item by uid.
+    pub fn highlight_by_uid(&mut self, uid: &str) {
+        self.items.set_filter(None);
+        self.items.highlight_item_by_uid(uid);
+    }
+
+    /// Draws [`Select`] on the provided frame area.
+    pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let draw_filter = self.is_filter_visible();
+        let layout = get_layout(area, draw_filter);
+
+        self.area = area;
+        if draw_filter {
+            self.filter_area = layout[0];
+            self.items_area = layout[1];
+        } else {
+            self.filter_area = Rect::default();
+            self.items_area = layout[0];
+        }
+
+        self.items.update_page(self.items_area.height);
+        let list = self.items.get_paged_names(usize::from(self.items_area.width));
+        let list = list
+            .into_iter()
+            .map(|(s, is_hl)| (s, if is_hl { self.colors.normal_hl } else { self.colors.normal }))
+            .collect::<Vec<_>>();
+        frame.render_widget(&mut ListWidget { list }, self.items_area);
+
+        if draw_filter {
+            self.filter.draw(frame, layout[0]);
+        }
+    }
+
+    /// Highlights item which name matches specified filter value.
+    pub fn highlight_item_by_filter_value(&mut self) {
+        if self.highlight_exact {
+            self.items.highlight_item_by_name(self.filter.value());
+        } else {
+            self.items.highlight_item_by_name_start(self.filter.value());
+            if self.items.get_highlighted_item_index().is_none() {
+                self.items.highlight_first_item();
+            }
+        }
+    }
+
+    /// Updates filter applied on items.
+    pub fn update_items_filter(&mut self) {
+        if self.filter_disabled {
+            return;
+        }
+
+        let new_filter = self.filter.value();
+        let current_filter = self.items.filter();
+        let filter_changed = match (new_filter.is_empty(), current_filter) {
+            (true, None | Some("")) => false,
+            (true, Some(_)) => {
+                self.items.set_filter(None);
+                true
+            },
+            (false, Some(current)) if new_filter == current => false,
+            (false, _) => {
+                self.items.set_filter(Some(self.filter.value().to_owned()));
+                self.highlight_item_by_filter_value();
+                true
+            },
+        };
+
+        if filter_changed
+            && self.highlight_exact
+            && let Some(highlighted) = self.items.get_highlighted_item_name()
+            && highlighted != self.filter.value()
+        {
+            self.items.unhighlight_item();
+        }
+    }
+}
+
+impl<T: Table> Responsive for Select<T> {
+    fn process_event(&mut self, event: &TuiEvent) -> ResponseEvent {
+        self.last_key_highlighted = false;
+
+        match event {
+            TuiEvent::Key(key) => {
+                if key.modifiers == KeyModifiers::ALT {
+                    return ResponseEvent::Handled;
+                }
+
+                if key.code == KeyCode::PageUp
+                    || key.code == KeyCode::Up
+                    || key.code == KeyCode::PageDown
+                    || key.code == KeyCode::Down
+                {
+                    self.last_key_highlighted = true;
+                }
+
+                // Process Home and End keys directly by filter input if we show cursor
+                // (that means move cursor to start or end of the filter input text).
+                if (self.filter.is_cursor_visible()
+                    && !self.filter_disabled
+                    && (key.code == KeyCode::Home || key.code == KeyCode::End))
+                    || self.items.process_event(event) == ResponseEvent::NotHandled
+                {
+                    if !self.filter_disabled {
+                        self.filter.process_event(event);
+                    }
+
+                    self.update_items_filter();
+                }
+            },
+            TuiEvent::Mouse(mouse) => {
+                if mouse.kind == MouseEventKind::Moved && self.items_area.contains(Position::new(mouse.column, mouse.row)) {
+                    let line = mouse.row.saturating_sub(self.items_area.y);
+                    self.items.highlight_item_by_line(line);
+                }
+
+                if !self.filter_disabled && self.filter.process_event(event) == ResponseEvent::Accepted {
+                    return ResponseEvent::Accepted;
+                }
+
+                self.items.process_event(event);
+            },
+            TuiEvent::Command(_) => (),
+        }
+
+        ResponseEvent::Handled
+    }
+}
+
+fn get_layout(area: Rect, is_filter_shown: bool) -> Rc<[Rect]> {
+    let constraints = if is_filter_shown {
+        vec![Constraint::Length(1), Constraint::Fill(1)]
+    } else {
+        vec![Constraint::Fill(1)]
+    };
+
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area)
+}

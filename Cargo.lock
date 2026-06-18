@@ -193,136 +193,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "b4n"
-version = "0.4.9"
-dependencies = [
- "ansi-to-tui",
- "anyhow",
- "arboard",
- "b4n-common",
- "b4n-config",
- "b4n-kube",
- "b4n-list",
- "b4n-tasks",
- "b4n-tui",
- "clap",
- "crossterm 0.29.0",
- "delegate",
- "futures",
- "jsonpath-rust",
- "k8s-openapi",
- "kube",
- "ratatui",
- "rstest",
- "syntect",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tui-term",
-]
-
-[[package]]
-name = "b4n-common"
-version = "0.4.9"
-dependencies = [
- "anyhow",
- "sha1",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-error",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "b4n-config"
-version = "0.4.9"
-dependencies = [
- "anyhow",
- "b4n-common",
- "crossterm 0.29.0",
- "notify",
- "ratatui-core",
- "serde",
- "serde_yaml",
- "syntect",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "b4n-kube"
-version = "0.4.9"
-dependencies = [
- "b4n-common",
- "base64",
- "delegate",
- "futures",
- "k8s-openapi",
- "kube",
- "pin-project",
- "serde_yaml",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "b4n-list"
-version = "0.4.9"
-dependencies = [
- "crossterm 0.29.0",
- "k8s-openapi",
-]
-
-[[package]]
-name = "b4n-tasks"
-version = "0.4.9"
-dependencies = [
- "b4n-common",
- "b4n-config",
- "b4n-kube",
- "http",
- "k8s-openapi",
- "kube",
- "ratatui-core",
- "serde_yaml",
- "syntect",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "b4n-tui"
-version = "0.4.9"
-dependencies = [
- "anyhow",
- "b4n-common",
- "b4n-config",
- "b4n-kube",
- "b4n-list",
- "crossterm 0.29.0",
- "delegate",
- "ratatui-core",
- "ratatui-crossterm",
- "ratatui-widgets",
- "textwrap",
- "tokio",
- "tokio-util",
- "tui-input",
-]
-
-[[package]]
 name = "backon"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1761,6 +1631,136 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mirante"
+version = "0.4.9"
+dependencies = [
+ "ansi-to-tui",
+ "anyhow",
+ "arboard",
+ "clap",
+ "crossterm 0.29.0",
+ "delegate",
+ "futures",
+ "jsonpath-rust",
+ "k8s-openapi",
+ "kube",
+ "mirante-common",
+ "mirante-config",
+ "mirante-kube",
+ "mirante-list",
+ "mirante-tasks",
+ "mirante-tui",
+ "ratatui",
+ "rstest",
+ "syntect",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tui-term",
+]
+
+[[package]]
+name = "mirante-common"
+version = "0.4.9"
+dependencies = [
+ "anyhow",
+ "sha1",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mirante-config"
+version = "0.4.9"
+dependencies = [
+ "anyhow",
+ "crossterm 0.29.0",
+ "mirante-common",
+ "notify",
+ "ratatui-core",
+ "serde",
+ "serde_yaml",
+ "syntect",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "mirante-kube"
+version = "0.4.9"
+dependencies = [
+ "base64",
+ "delegate",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "mirante-common",
+ "pin-project",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "mirante-list"
+version = "0.4.9"
+dependencies = [
+ "crossterm 0.29.0",
+ "k8s-openapi",
+]
+
+[[package]]
+name = "mirante-tasks"
+version = "0.4.9"
+dependencies = [
+ "http",
+ "k8s-openapi",
+ "kube",
+ "mirante-common",
+ "mirante-config",
+ "mirante-kube",
+ "ratatui-core",
+ "serde_yaml",
+ "syntect",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "mirante-tui"
+version = "0.4.9"
+dependencies = [
+ "anyhow",
+ "crossterm 0.29.0",
+ "delegate",
+ "mirante-common",
+ "mirante-config",
+ "mirante-kube",
+ "mirante-list",
+ "ratatui-core",
+ "ratatui-crossterm",
+ "ratatui-widgets",
+ "textwrap",
+ "tokio",
+ "tokio-util",
+ "tui-input",
 ]
 
 [[package]]

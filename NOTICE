@@ -1,0 +1,12 @@
+mirante
+Copyright 2026 pleme-io
+
+This product is a fork of b4n, rebuilt to pleme-io standards.
+
+  b4n — https://github.com/fioletoven/b4n
+  Copyright 2024-2026 Piotr Frankowski
+  Licensed under the MIT License.
+
+The original b4n MIT license text is retained in LICENSE. mirante remains
+MIT-licensed. Upstream authorship and history are preserved in the git log;
+upstream bugfixes to the k8s engine (mirante-kube) may be cherry-picked.

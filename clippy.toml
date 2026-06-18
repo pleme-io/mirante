@@ -1,0 +1,17 @@
+# pleme-io typed-emission enforcement — theory/TYPED-EMISSION.md
+# Substrate helper: pleme-io/substrate/lib/build/rust/format-ban.{nix,clippy.toml}
+#
+# `std::format!()` is banned. Use write!() inside Display/Debug impls,
+# tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed
+# AST renderer. Free-form string composition is a substrate gap; close it.
+#
+# NOTE (mirante fork): inherited from b4n with ~227 format!() call sites.
+# This file DECLARES the ban; the `clippy::disallowed_macros` lint is NOT
+# yet raised to deny in Cargo.toml (see CLAUDE.md `pending-format-ban:`).
+# Flip [workspace.lints.clippy] disallowed_macros = "deny" once the
+# burndown reaches zero. Until then the ban is documented, not enforced.
+
+disallowed-macros = [
+  { path = "std::format",
+    reason = "format!() is banned per pleme-io/theory/TYPED-EMISSION.md. Use write!() inside Display/Debug impls, tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed AST renderer." },
+]

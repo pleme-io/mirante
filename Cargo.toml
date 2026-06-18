@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "b4n-common",
-    "b4n-config",
-    "b4n-kube",
-    "b4n-list",
-    "b4n-tasks",
-    "b4n-tui",
+    "mirante-common",
+    "mirante-config",
+    "mirante-kube",
+    "mirante-list",
+    "mirante-tasks",
+    "mirante-tui",
 ]
 
 [workspace.package]
@@ -14,14 +14,23 @@ version = "0.4.9"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
+repository = "https://github.com/pleme-io/mirante"
+
+# pleme-io pedantic clippy gate (substrate Conventions). The format!() ban is
+# DECLARED in clippy.toml but NOT yet raised to deny here — 227 inherited call
+# sites (see CLAUDE.md `pending-format-ban`); flip disallowed_macros to "deny"
+# once the burndown reaches zero.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
 
 [workspace.dependencies]
-b4n-common = { path = "b4n-common" }
-b4n-config = { path = "b4n-config" }
-b4n-kube = { path = "b4n-kube" }
-b4n-list = { path = "b4n-list" }
-b4n-tasks = { path = "b4n-tasks" }
-b4n-tui = { path = "b4n-tui" }
+mirante-common = { path = "mirante-common" }
+mirante-config = { path = "mirante-config" }
+mirante-kube = { path = "mirante-kube" }
+mirante-list = { path = "mirante-list" }
+mirante-tasks = { path = "mirante-tasks" }
+mirante-tui = { path = "mirante-tui" }
 ansi-to-tui = { version = "8.0" }
 anyhow = { version = "1.0" }
 arboard = { version = "3.6", default-features = false }
@@ -58,23 +67,27 @@ tui-term = { version = "0.3" }
 uuid = { version = "1", features = ["v4"] }
 
 [[bin]]
-name = "b4n"
-path = "./b4n/main.rs"
+name = "mirante"
+path = "./mirante/main.rs"
 
 [package]
-name = "b4n"
+name = "mirante"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-b4n-common = { workspace = true }
-b4n-config = { workspace = true }
-b4n-kube = { workspace = true }
-b4n-list = { workspace = true }
-b4n-tasks = { workspace = true }
-b4n-tui = { workspace = true }
+mirante-common = { workspace = true }
+mirante-config = { workspace = true }
+mirante-kube = { workspace = true }
+mirante-list = { workspace = true }
+mirante-tasks = { workspace = true }
+mirante-tui = { workspace = true }
 ansi-to-tui = { workspace = true }
 anyhow = { workspace = true }
 arboard = { workspace = true }

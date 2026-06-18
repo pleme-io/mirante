@@ -1,0 +1,565 @@
+use mirante_common::NotificationSink;
+use mirante_config::keys::KeyCommand;
+use mirante_kube::{
+    ALL_NAMESPACES, CONTAINERS, DAEMON_SETS, DEPLOYMENTS, EVENTS, JOBS, Kind, NAMESPACES, NODES, Namespace, ObserverResult, PODS,
+    REPLICA_SETS, ResourceRef, ResourceRefFilter, ResourceTag, SECRETS, SERVICES, STATEFUL_SETS,
+};
+use mirante_list::Row;
+use mirante_tui::ToSelectData;
+use mirante_tui::{MouseEventKind, ResponseEvent, Responsive, ScopeData, TuiEvent, table::Table, table::ViewType};
+use crossterm::event::KeyModifiers;
+use delegate::delegate;
+use kube::discovery::Scope;
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use std::{collections::HashMap, rc::Rc};
+
+use crate::core::{PreviousData, ResourcesInfo, SharedAppData, SharedAppDataExt};
+use crate::kube::resources::pod::{get_single_container, has_single_container};
+use crate::kube::resources::{ResourceItem, ResourcesList};
+use crate::ui::presentation::{ListHeader, ListViewer};
+
+/// Actions to perform on the next table refresh.
+#[derive(Default)]
+pub struct NextRefreshActions {
+    pub highlight_item: Option<(String, String)>,
+    pub apply_filter: Option<String>,
+    pub apply_offset: Option<usize>,
+    pub sort_info: Option<(usize, bool)>,
+    pub clear_header_scope: bool,
+}
+
+impl NextRefreshActions {
+    /// Creates new [`NextRefreshActions`] instance from the [`PreviousData`] object.
+    pub fn from_previous(previous: &PreviousData) -> Self {
+        let highlight_item = match &previous.highlighted {
+            ToSelectData::Some(name, namespace) => Some((name.clone(), namespace.clone())),
+            ToSelectData::None => None,
+        };
+        NextRefreshActions {
+            highlight_item,
+            apply_filter: previous.filter.as_deref().map(String::from),
+            apply_offset: Some(previous.offset),
+            sort_info: Some(previous.sort_info),
+            clear_header_scope: false,
+        }
+    }
+
+    /// Clears the [`NextRefreshActions`] object.
+    pub fn clear(&mut self) {
+        self.highlight_item = None;
+        self.apply_filter = None;
+    }
+}
+
+/// Resources table.
+pub struct ResourcesTable {
+    pub header: ListHeader,
+    pub list: ListViewer<ResourcesList>,
+    app_data: SharedAppData,
+    next_refresh: NextRefreshActions,
+}
+
+impl ResourcesTable {
+    /// Creates a new resources table.
+    pub fn new(app_data: SharedAppData) -> Self {
+        let list = ListViewer::new(
+            Rc::clone(&app_data),
+            ResourcesList::default().with_filter_settings(Some("e")),
+            ViewType::Compact,
+        );
+        let header = ListHeader::new(Rc::clone(&app_data), list.table.len());
+
+        Self {
+            header,
+            list,
+            app_data,
+            next_refresh: NextRefreshActions::default(),
+        }
+    }
+
+    /// Moves all table data to the cache.
+    pub fn move_to_cache(&mut self) {
+        self.list.table.clear();
+        self.header.set_count(0);
+        self.header.show_filtered_icon(false);
+    }
+
+    /// Restores all table data from the cache.
+    pub fn restore_from_cache(&mut self, key: &str) -> bool {
+        if self.list.table.restore_from_cache(key) {
+            self.process_init_result(false);
+            self.process_initdone_result();
+            self.update_app_data_current();
+
+            return true;
+        }
+
+        false
+    }
+
+    /// Sets initial kubernetes resources data for [`ResourcesTable`].
+    pub fn set_resources_info(&mut self, context: String, namespace: Namespace, version: String, scope: Scope) {
+        if scope == Scope::Cluster || !namespace.is_all() {
+            self.set_view(ViewType::Compact);
+        } else {
+            self.set_view(ViewType::Full);
+        }
+
+        self.app_data.borrow_mut().current = ResourcesInfo::from(context, namespace, version, scope);
+    }
+
+    /// Returns [`NextRefreshActions`] object.
+    pub fn next_refresh(&self) -> &NextRefreshActions {
+        &self.next_refresh
+    }
+
+    /// Remembers actions that will be applied for next background observer result.
+    pub fn set_next_refresh(&mut self, actions: NextRefreshActions) {
+        self.next_refresh = actions;
+    }
+
+    /// Remembers resource name and namespace that will be highlighted for next background observer result.
+    pub fn set_next_highlight(&mut self, to_select: ToSelectData) {
+        let highlight_item = match to_select {
+            ToSelectData::Some(name, namespace) => Some((name, namespace)),
+            ToSelectData::None => None,
+        };
+        self.next_refresh.highlight_item = highlight_item;
+    }
+
+    /// Remembers if header scope should be reset to default for next background observer result.
+    pub fn clear_header_scope(&mut self, clear_on_next: bool) {
+        self.next_refresh.clear_header_scope = clear_on_next;
+    }
+
+    /// Copies all / selected items to clipboard.
+    pub fn copy_to_clipboard(&mut self, selected: bool, footer: &NotificationSink) {
+        let text = self.list.table.table.get_items_as_text(self.list.view, selected);
+        self.app_data.copy_to_clipboard(text.join("\n"), footer, || {
+            if selected {
+                "Selected resources copied to clipboard"
+            } else {
+                "All resources copied to clipboard"
+            }
+        });
+    }
+
+    delegate! {
+        to self.list.table {
+            pub fn deselect_all(&mut self);
+            pub fn get_selected_items(&self) -> HashMap<&str, Vec<&str>>;
+            pub fn get_resource(&self, name: &str, namespace: &Namespace) -> Option<&ResourceItem>;
+            pub fn has_containers(&self) -> bool;
+            pub fn is_filtered(&self) -> bool;
+            pub fn filter(&self) -> Option<&str>;
+        }
+    }
+
+    /// Gets current kind (plural) for resources listed in [`ResourcesTable`].
+    pub fn kind_plural(&self) -> &str {
+        &self.list.table.data.kind_plural
+    }
+
+    /// Gets current scope for resources listed in [`ResourcesTable`].
+    pub fn scope(&self) -> &Scope {
+        &self.list.table.data.scope
+    }
+
+    /// Gets resources group.
+    pub fn group(&self) -> &str {
+        &self.list.table.data.group
+    }
+
+    /// Gets resources version.
+    pub fn version(&self) -> &str {
+        &self.list.table.data.version
+    }
+
+    /// Returns resources kind.
+    pub fn get_kind(&self) -> Kind {
+        Kind::new(
+            &self.list.table.data.kind_plural,
+            &self.list.table.data.group,
+            &self.list.table.data.version,
+        )
+    }
+
+    /// Returns resources kind.\
+    /// **Note** that it returns `pods` if the currently shown items are containers.
+    pub fn get_kind_for_selector(&self) -> Kind {
+        if self.list.table.data.resource.is_container() {
+            PODS.into()
+        } else {
+            self.get_kind()
+        }
+    }
+
+    /// Returns [`ResourceRef`] for currently highlighted item.
+    pub fn get_resource_ref(&self, prefer_container: bool) -> Option<ResourceRef> {
+        self.list
+            .table
+            .get_highlighted_resource()
+            .and_then(|r| self.resource_ref_from(r, prefer_container))
+    }
+
+    /// Sets namespace for [`ResourcesTable`].
+    pub fn set_namespace(&mut self, namespace: Namespace) {
+        let is_full = namespace.is_all() && self.app_data.borrow().current.scope == Scope::Namespaced;
+        self.set_view(if is_full { ViewType::Full } else { ViewType::Compact });
+
+        if namespace.is_all() || !self.app_data.borrow().current.is_namespace_equal(&namespace) {
+            self.app_data.borrow_mut().current.set_namespace(namespace);
+        }
+    }
+
+    /// Sets list view for [`ResourcesTable`].
+    pub fn set_view(&mut self, view: ViewType) {
+        self.list.view = view;
+    }
+
+    /// Sets filter on the resources list.
+    pub fn set_filter(&mut self, value: &str) {
+        Self::set_filter_internal(&mut self.header, &mut self.list, value);
+    }
+
+    /// Updates resources list with a new data from [`ObserverResult`].
+    pub fn update_resources_list(&mut self, result: ObserverResult<ResourceItem>) {
+        let is_init = matches!(result, ObserverResult::Init(_));
+        let is_init_done = matches!(result, ObserverResult::InitDone);
+
+        if self.list.table.update(result) {
+            self.update_app_data_current();
+        }
+
+        if is_init {
+            self.process_init_result(true);
+        }
+
+        if is_init_done {
+            self.process_initdone_result();
+        }
+
+        self.header.set_count(self.list.table.len());
+    }
+
+    /// Process UI key/mouse event.
+    pub fn process_event(&mut self, event: &TuiEvent) -> ResponseEvent {
+        self.next_refresh.clear();
+
+        if self.app_data.has_binding(event, KeyCommand::NavigateBack) {
+            return self.process_esc_key();
+        }
+
+        if self.app_data.has_binding(event, KeyCommand::PortForwardsOpen) {
+            return ResponseEvent::ShowPortForwards;
+        }
+
+        let response = self.list.process_event(event);
+        if response == ResponseEvent::NotHandled {
+            return self.process_highlighted_resource_event(event);
+        }
+
+        response
+    }
+
+    /// Draws [`ResourcesTable`] on the provided frame and area.
+    pub fn draw(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![Constraint::Length(1), Constraint::Fill(1)])
+            .split(area);
+
+        self.header.draw(frame, layout[0]);
+        self.list.draw(frame, layout[1]);
+    }
+
+    fn set_filter_internal(header: &mut ListHeader, list: &mut ListViewer<ResourcesList>, value: &str) {
+        header.show_filtered_icon(!value.is_empty());
+        if value.is_empty() {
+            if list.table.is_filtered() {
+                list.table.set_filter(None);
+                header.set_count(list.table.len());
+            }
+        } else if list.table.filter().is_none_or(|f| f != value) {
+            list.table.set_filter(Some(value.to_owned()));
+            header.set_count(list.table.len());
+        }
+    }
+
+    fn process_init_result(&mut self, is_final: bool) {
+        if self.app_data.borrow().is_pinned {
+            if let Some(filter) = self.app_data.borrow().pinned_filter.as_deref() {
+                Self::set_filter_internal(&mut self.header, &mut self.list, filter);
+            } else {
+                Self::set_filter_internal(&mut self.header, &mut self.list, "");
+            }
+        } else if let Some(filter) = self.next_refresh.apply_filter.as_deref() {
+            Self::set_filter_internal(&mut self.header, &mut self.list, filter);
+        } else {
+            Self::set_filter_internal(&mut self.header, &mut self.list, "");
+        }
+
+        if is_final {
+            self.next_refresh.apply_filter = None;
+        }
+
+        if let Some((column_no, is_descending)) = self.next_refresh.sort_info.take() {
+            self.list.table.table.header.set_sort_info(column_no, is_descending);
+        }
+
+        if self.next_refresh.clear_header_scope {
+            self.header.set_scope(None);
+            self.next_refresh.clear_header_scope = false;
+        }
+
+        if let Some(offset) = self.next_refresh.apply_offset {
+            self.init_offset(offset);
+        }
+    }
+
+    fn process_initdone_result(&mut self) {
+        if let Some((name, group)) = self.next_refresh.highlight_item.take() {
+            self.list.table.highlight_item_by_name_and_group(&name, &group);
+        } else if !self.list.table.is_anything_highlighted() {
+            self.list.table.highlight_first_item();
+        }
+
+        if let Some(offset) = self.next_refresh.apply_offset.take() {
+            self.init_offset(offset);
+        }
+    }
+
+    fn update_app_data_current(&mut self) {
+        let current = &mut self.app_data.borrow_mut().current;
+        current.update_from(&self.list.table.data);
+    }
+
+    fn process_highlighted_resource_event(&mut self, event: &TuiEvent) -> ResponseEvent {
+        if let Some(resource) = self.list.table.get_highlighted_resource() {
+            if self.app_data.has_binding(event, KeyCommand::NavigateInto) {
+                return self.process_enter_key(resource);
+            }
+
+            if let Some(line_no) = event.get_line_no(MouseEventKind::LeftDoubleClick, KeyModifiers::NONE, self.list.area)
+                && usize::from(line_no) < self.list.table.len()
+            {
+                return self.process_enter_key(resource);
+            }
+
+            let is_container = self.kind_plural() == CONTAINERS;
+            if self.app_data.has_binding(event, KeyCommand::EventsShow) {
+                if !is_container && resource.name() != ALL_NAMESPACES {
+                    return self.process_view_events(resource);
+                }
+
+                return ResponseEvent::NotHandled;
+            }
+
+            if self.app_data.has_binding(event, KeyCommand::InvolvedObjectShow)
+                && let Some(involved) = &resource.involved_object
+            {
+                return ResponseEvent::ViewInvolved(
+                    involved.kind.clone().into(),
+                    involved.namespace.clone().into(),
+                    ToSelectData::new(&involved.name, involved.namespace.as_option()),
+                );
+            }
+
+            if self.app_data.has_binding(event, KeyCommand::DescribeOpen) {
+                return self.process_describe(resource);
+            }
+
+            if self.app_data.has_binding(event, KeyCommand::YamlOpen)
+                || (self.app_data.has_binding(event, KeyCommand::YamlDecode) && self.kind_plural() == SECRETS)
+            {
+                return self.process_view_yaml(resource, self.app_data.has_binding(event, KeyCommand::YamlDecode), false);
+            }
+
+            if self.app_data.has_binding(event, KeyCommand::YamlEdit) && self.list.table.data.is_editable {
+                return self.process_view_yaml(resource, true, true);
+            }
+
+            if is_container || self.kind_plural() == PODS {
+                let is_multiple = !is_container && resource.data.as_ref().is_some_and(|d| d.tags.len() > 1);
+                if self.app_data.has_binding(event, KeyCommand::LogsOpen) {
+                    return self.process_view_logs(resource, !is_multiple, false);
+                }
+
+                if self.app_data.has_binding(event, KeyCommand::PreviousLogsOpen) {
+                    return self.process_view_logs(resource, !is_multiple, true);
+                }
+
+                if is_container || has_single_container(resource.data.as_ref()) {
+                    if self.app_data.has_binding(event, KeyCommand::PortForwardsCreate) {
+                        return self.process_view_ports(resource);
+                    }
+
+                    if self.app_data.has_binding(event, KeyCommand::ContainerAttach) {
+                        return self.process_container_attach(resource);
+                    }
+
+                    if self.app_data.has_binding(event, KeyCommand::ShellOpen) {
+                        return self.process_open_shell(resource);
+                    }
+                } else if self.app_data.has_binding(event, KeyCommand::PortForwardsCreate)
+                    || self.app_data.has_binding(event, KeyCommand::ContainerAttach)
+                    || self.app_data.has_binding(event, KeyCommand::ShellOpen)
+                {
+                    return self.process_enter_key(resource);
+                }
+            }
+        }
+
+        ResponseEvent::NotHandled
+    }
+
+    fn process_esc_key(&self) -> ResponseEvent {
+        if self.kind_plural() == NAMESPACES {
+            ResponseEvent::Handled
+        } else if !self.app_data.borrow().previous.is_empty() {
+            ResponseEvent::ViewPreviousResource
+        } else {
+            ResponseEvent::ViewNamespaces
+        }
+    }
+
+    fn process_enter_key(&self, resource: &ResourceItem) -> ResponseEvent {
+        match self.kind_plural() {
+            NODES => ResourcesTable::process_view_nodes(resource),
+            JOBS => self.process_view_jobs(resource),
+            DEPLOYMENTS => self.process_view_selector(resource, REPLICA_SETS),
+            SERVICES | REPLICA_SETS | STATEFUL_SETS | DAEMON_SETS => self.process_view_selector(resource, PODS),
+            NAMESPACES => ResponseEvent::Change(PODS.to_owned(), resource.name.clone()),
+            PODS => ResponseEvent::ViewContainers(resource.name.clone(), resource.namespace.clone().unwrap_or_default()),
+            CONTAINERS => self.process_view_logs(resource, true, false),
+            _ => self.process_view_yaml(resource, false, false),
+        }
+    }
+
+    fn process_view_ports(&self, resource: &ResourceItem) -> ResponseEvent {
+        self.resource_ref_from(resource, true)
+            .map_or(ResponseEvent::NotHandled, ResponseEvent::ListResourcePorts)
+    }
+
+    fn process_view_logs(&self, resource: &ResourceItem, is_one_container: bool, is_previous: bool) -> ResponseEvent {
+        let containers = (!is_one_container)
+            .then(|| resource.data.as_ref().map(|d| d.tags.to_vec()))
+            .flatten();
+
+        let Some(resource) = self.resource_ref_from(resource, is_one_container) else {
+            return ResponseEvent::NotHandled;
+        };
+
+        if is_previous {
+            ResponseEvent::ViewPreviousLogs(resource, containers)
+        } else {
+            ResponseEvent::ViewLogs(resource, containers)
+        }
+    }
+
+    fn process_container_attach(&self, resource: &ResourceItem) -> ResponseEvent {
+        self.resource_ref_from(resource, true)
+            .map_or(ResponseEvent::NotHandled, ResponseEvent::AttachContainer)
+    }
+
+    fn process_open_shell(&self, resource: &ResourceItem) -> ResponseEvent {
+        self.resource_ref_from(resource, true)
+            .map_or(ResponseEvent::NotHandled, ResponseEvent::OpenShell)
+    }
+
+    fn process_describe(&self, resource: &ResourceItem) -> ResponseEvent {
+        self.resource_ref_from(resource, false)
+            .map_or(ResponseEvent::NotHandled, |r| {
+                ResponseEvent::Describe(r, resource.uid.clone())
+            })
+    }
+
+    fn process_view_yaml(&self, resource: &ResourceItem, decode: bool, edit: bool) -> ResponseEvent {
+        self.resource_ref_from(resource, false)
+            .map_or(ResponseEvent::NotHandled, |r| ResponseEvent::ViewYaml(r, decode, edit))
+    }
+
+    fn resource_ref_from(&self, resource: &ResourceItem, prefer_container: bool) -> Option<ResourceRef> {
+        if self.kind_plural() == CONTAINERS {
+            if let Some(name) = self.app_data.borrow().current.resource.name.clone() {
+                return Some(ResourceRef::container(
+                    name,
+                    resource.namespace.clone().into(),
+                    resource.name.clone(),
+                ));
+            }
+        } else if self.kind_plural() == PODS && prefer_container {
+            if let Some(container) = get_single_container(resource.data.as_ref()) {
+                return Some(ResourceRef::container(
+                    resource.name.clone(),
+                    resource.namespace.clone().into(),
+                    container.to_owned(),
+                ));
+            }
+        } else if resource.name() != ALL_NAMESPACES && resource.group() != NAMESPACES {
+            return Some(ResourceRef::named(
+                self.get_kind(),
+                resource.group().into(),
+                resource.name().to_owned(),
+            ));
+        }
+
+        None
+    }
+
+    fn process_view_events(&self, resource: &ResourceItem) -> ResponseEvent {
+        let scope = ScopeData {
+            header: self.app_data.borrow().current.scope.clone(),
+            list: Scope::Cluster,
+            filter: ResourceRefFilter::involved(resource.name.clone(), &resource.uid),
+        };
+        ResponseEvent::ViewScoped(EVENTS.to_owned(), resource.namespace.clone(), ToSelectData::None, scope)
+    }
+
+    fn process_view_nodes(resource: &ResourceItem) -> ResponseEvent {
+        let filter = ResourceRefFilter::node(resource.name.clone(), &resource.name);
+        ResponseEvent::ViewScoped(
+            PODS.to_owned(),
+            None,
+            ToSelectData::None,
+            ScopeData::namespace_visible(filter),
+        )
+    }
+
+    fn process_view_jobs(&self, resource: &ResourceItem) -> ResponseEvent {
+        let scope = ScopeData {
+            header: self.app_data.borrow().current.scope.clone(),
+            list: Scope::Cluster,
+            filter: ResourceRefFilter::job(resource.name.clone(), &resource.name),
+        };
+        ResponseEvent::ViewScoped(PODS.to_owned(), resource.namespace.clone(), ToSelectData::None, scope)
+    }
+
+    fn process_view_selector(&self, resource: &ResourceItem, target: &str) -> ResponseEvent {
+        let labels = resource.data.as_ref().and_then(|d| {
+            d.tags.iter().find_map(|t| match t {
+                ResourceTag::MatchLabels(s) if !s.is_empty() => Some(s),
+                _ => None,
+            })
+        });
+        if let Some(labels) = labels {
+            let filter = ResourceRefFilter::labels(resource.name.clone(), labels.clone());
+            ResponseEvent::ViewScoped(
+                target.to_owned(),
+                resource.namespace.clone(),
+                ToSelectData::None,
+                ScopeData::namespace_hidden(filter),
+            )
+        } else {
+            self.process_view_yaml(resource, false, false)
+        }
+    }
+
+    fn init_offset(&mut self, offset: usize) {
+        let current_width = usize::from(self.list.area.width);
+        // we need to refresh header here, as init data invalidates its cache.
+        self.list.table.refresh_header(self.list.view, current_width);
+        self.list.table.table.set_offset(offset);
+    }
+}

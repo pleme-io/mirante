@@ -1,0 +1,24 @@
+name: gen-spec
+
+# Regenerates Cargo.gen.lock on Cargo.toml/Cargo.lock changes (the substrate
+# gen typed-spec contract). MUST share the same concurrency group key as
+# auto-release.yml to avoid the atomic-push race on Cargo.gen.lock.
+concurrency:
+  group: mirante-mainline-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+
+jobs:
+  gen-spec:
+    uses: pleme-io/substrate/.github/workflows/reusable-gen-spec.yml@main
+    secrets: inherit
