@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "cargo_lock_sha256": "b8a5ec82d6f571f3f7c844ba76665025b72c22bbcd5dfb58e8b3f4b740da495e",
+  "cargo_lock_sha256": "1efe3684487ff7ade8699451e12948535de7b248abba20e71078b960862fb660",
   "target_resolves": {
     "base": {
       "adler2-2.0.1": {
@@ -4764,7 +4764,7 @@
           "os-poll"
         ]
       },
-      "mirante-0.4.9": {
+      "mirante-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "ansi_to_tui",
@@ -4880,7 +4880,7 @@
           },
           {
             "name": "mirante_common",
-            "package_key": "mirante-common-0.4.9",
+            "package_key": "mirante-common-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4890,7 +4890,7 @@
           },
           {
             "name": "mirante_config",
-            "package_key": "mirante-config-0.4.9",
+            "package_key": "mirante-config-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4900,7 +4900,7 @@
           },
           {
             "name": "mirante_kube",
-            "package_key": "mirante-kube-0.4.9",
+            "package_key": "mirante-kube-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4910,7 +4910,7 @@
           },
           {
             "name": "mirante_list",
-            "package_key": "mirante-list-0.4.9",
+            "package_key": "mirante-list-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4920,7 +4920,7 @@
           },
           {
             "name": "mirante_tasks",
-            "package_key": "mirante-tasks-0.4.9",
+            "package_key": "mirante-tasks-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4930,7 +4930,7 @@
           },
           {
             "name": "mirante_tui",
-            "package_key": "mirante-tui-0.4.9",
+            "package_key": "mirante-tui-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5023,7 +5023,7 @@
         ],
         "features": []
       },
-      "mirante-common-0.4.9": {
+      "mirante-common-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "anyhow",
@@ -5134,7 +5134,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mirante-config-0.4.9": {
+      "mirante-config-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "anyhow",
@@ -5160,7 +5160,7 @@
           },
           {
             "name": "mirante_common",
-            "package_key": "mirante-common-0.4.9",
+            "package_key": "mirante-common-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5274,7 +5274,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mirante-kube-0.4.9": {
+      "mirante-kube-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "base64",
@@ -5335,7 +5335,7 @@
           },
           {
             "name": "mirante_common",
-            "package_key": "mirante-common-0.4.9",
+            "package_key": "mirante-common-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5427,7 +5427,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mirante-list-0.4.9": {
+      "mirante-list-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "crossterm",
@@ -5457,7 +5457,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mirante-tasks-0.4.9": {
+      "mirante-tasks-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "http",
@@ -5498,7 +5498,7 @@
           },
           {
             "name": "mirante_common",
-            "package_key": "mirante-common-0.4.9",
+            "package_key": "mirante-common-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5508,7 +5508,7 @@
           },
           {
             "name": "mirante_config",
-            "package_key": "mirante-config-0.4.9",
+            "package_key": "mirante-config-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5518,7 +5518,7 @@
           },
           {
             "name": "mirante_kube",
-            "package_key": "mirante-kube-0.4.9",
+            "package_key": "mirante-kube-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5622,7 +5622,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mirante-tui-0.4.9": {
+      "mirante-tui-0.4.10": {
         "runtime_dependencies": [
           {
             "name": "anyhow",
@@ -5658,7 +5658,7 @@
           },
           {
             "name": "mirante_common",
-            "package_key": "mirante-common-0.4.9",
+            "package_key": "mirante-common-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5668,7 +5668,7 @@
           },
           {
             "name": "mirante_config",
-            "package_key": "mirante-config-0.4.9",
+            "package_key": "mirante-config-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5678,7 +5678,7 @@
           },
           {
             "name": "mirante_kube",
-            "package_key": "mirante-kube-0.4.9",
+            "package_key": "mirante-kube-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -5688,7 +5688,7 @@
           },
           {
             "name": "mirante_list",
-            "package_key": "mirante-list-0.4.9",
+            "package_key": "mirante-list-0.4.10",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -16414,7 +16414,7 @@
     "mio-1.2.1": {
       "edition": "2021"
     },
-    "mirante-0.4.9": {
+    "mirante-0.4.10": {
       "edition": "2024",
       "build_script": "build.rs",
       "binaries": [
@@ -16424,42 +16424,42 @@
         }
       ]
     },
-    "mirante-common-0.4.9": {
+    "mirante-common-0.4.10": {
       "edition": "2024",
       "lib_target": {
         "name": "mirante_common",
         "path": "lib.rs"
       }
     },
-    "mirante-config-0.4.9": {
+    "mirante-config-0.4.10": {
       "edition": "2024",
       "lib_target": {
         "name": "mirante_config",
         "path": "lib.rs"
       }
     },
-    "mirante-kube-0.4.9": {
+    "mirante-kube-0.4.10": {
       "edition": "2024",
       "lib_target": {
         "name": "mirante_kube",
         "path": "lib.rs"
       }
     },
-    "mirante-list-0.4.9": {
+    "mirante-list-0.4.10": {
       "edition": "2024",
       "lib_target": {
         "name": "mirante_list",
         "path": "lib.rs"
       }
     },
-    "mirante-tasks-0.4.9": {
+    "mirante-tasks-0.4.10": {
       "edition": "2024",
       "lib_target": {
         "name": "mirante_tasks",
         "path": "lib.rs"
       }
     },
-    "mirante-tui-0.4.9": {
+    "mirante-tui-0.4.10": {
       "edition": "2024",
       "lib_target": {
         "name": "mirante_tui",
