@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "mirante"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
@@ -1665,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "mirante-common"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "anyhow",
  "sha1",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "mirante-config"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "anyhow",
  "crossterm 0.29.0",
@@ -1698,7 +1698,7 @@ dependencies = [
 
 [[package]]
 name = "mirante-kube"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "base64",
  "delegate",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "mirante-list"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "crossterm 0.29.0",
  "k8s-openapi",
@@ -1725,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "mirante-tasks"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "http",
  "k8s-openapi",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "mirante-tui"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "anyhow",
  "crossterm 0.29.0",
